@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jmx-perms
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  namespace: jmx-perms
+  name: jmx-secret
+data:
+  jmxremote.password: bW9uaXRvclJvbGUgIHF1aXRlc2VjcmV0CmNvbnRyb2xSb2xlICB2M3J5UzNrciF0Cg==
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: jmx-perms
+  name: jmx-config
+data:
+  jmxremote.access: |
+    monitorRole   readonly
+    controlRole   readwrite
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: non-root-init
+  name: non-root-init
+  namespace: jmx-perms
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: non-root-init
+  template:
+    metadata:
+      labels:
+        app: non-root-init
+    spec:
+      initContainers:
+        - image: busybox
+          name: init-jmx-password
+          command:
+            - sh
+          args:
+            - -c
+            - "cp /java/jmxremote.password /secret/jmxremote.password && chmod 600 /secret/jmxremote.password"
+          volumeMounts:
+            - name: shared
+              mountPath: /secret
+            - name: password
+              mountPath: /java/jmxremote.password
+              subPath: jmxremote.password
+      containers:
+        - image: willthames/jmx-demo
+          name: jmx-demo
+          args:
+            - -Dcom.sun.management.jmxremote.port=9090
+            - -Dcom.sun.management.jmxremote.rmi.port=9091
+            - -Dcom.sun.management.jmxremote.ssl=false
+            - -Dcom.sun.management.jmxremote.password.file=/secret/jmxremote.password
+            - -Dcom.sun.management.jmxremote.access.file=/java/jmxremote.access
+            - -Djava.rmi.server.hostname=localhost
+            - Sleep
+            - "10000"
+          volumeMounts:
+            - name: shared
+              mountPath: /secret
+            - name: access
+              mountPath: /java/jmxremote.access
+              subPath: jmxremote.access
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      volumes:
+        - name: shared
+          emptyDir: {}
+        - name: password
+          secret:
+            secretName: jmx-secret
+        - name: access
+          configMap:
+            name: jmx-config
